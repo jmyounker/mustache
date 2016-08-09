@@ -4,13 +4,15 @@ import (
     "bytes"
     "errors"
     "fmt"
-    "html/template"
+    //"html/template"
     "io"
     "io/ioutil"
     "os"
     "path"
     "reflect"
     "strings"
+    "strconv"
+    "encoding/json"
 )
 
 type textElement struct {
@@ -387,6 +389,19 @@ Outer:
                 } else {
                     continue Outer
                 }
+            case reflect.Array, reflect.Slice:
+                i, err := strconv.Atoi(name)
+                if err != nil {
+                    continue Outer
+                }
+                i = i - 1
+                if i < 0 {
+                    continue Outer
+                }
+                if i >= av.Len() {
+                    continue Outer
+                }
+                return av.Index(i)
             case reflect.Map:
                 ret := av.MapIndex(reflect.ValueOf(name))
                 if ret.IsValid() {
@@ -488,11 +503,22 @@ func renderElement(element interface{}, contextChain []interface{}, buf io.Write
         val := lookup(contextChain, elem.name)
 
         if val.IsValid() {
-            if elem.raw {
+
+            switch val.Kind() {
+            case reflect.Interface:
+                switch vx := val.Elem(); vx.Kind() {
+                case reflect.Slice, reflect.Array, reflect.Map:
+                    v, err := json.Marshal(val.Interface())
+                    if (err != nil) {
+                        fmt.Fprint(buf, v)
+                    } else {
+                        fmt.Fprintf(buf, string(v))
+                    }
+                default:
+                    fmt.Fprint(buf, val.Interface())
+                }
+            default:
                 fmt.Fprint(buf, val.Interface())
-            } else {
-                s := fmt.Sprint(val.Interface())
-                template.HTMLEscape(buf, []byte(s))
             }
         }
     case *sectionElement:
