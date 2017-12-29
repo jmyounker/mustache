@@ -2,17 +2,17 @@ package mustache
 
 import (
     "bytes"
+    "encoding/json"
     "errors"
     "fmt"
-    //"html/template"
+    "html/template"
     "io"
     "io/ioutil"
     "os"
     "path"
     "reflect"
-    "strings"
     "strconv"
-    "encoding/json"
+    "strings"
 )
 
 type textElement struct {
@@ -451,7 +451,7 @@ loop:
     return v
 }
 
-func renderSection(section *sectionElement, contextChain []interface{}, buf io.Writer) {
+func renderSection(strictMustache bool, section *sectionElement, contextChain []interface{}, buf io.Writer) {
     value := lookup(contextChain, section.name)
     var context = contextChain[len(contextChain)-1].(reflect.Value)
     var contexts = []interface{}{}
@@ -485,12 +485,12 @@ func renderSection(section *sectionElement, contextChain []interface{}, buf io.W
     for _, ctx := range contexts {
         chain2[0] = ctx
         for _, elem := range section.elems {
-            renderElement(elem, chain2, buf)
+            renderElement(strictMustache, elem, chain2, buf)
         }
     }
 }
 
-func renderElement(element interface{}, contextChain []interface{}, buf io.Writer) {
+func renderElement(strictMustache bool, element interface{}, contextChain []interface{}, buf io.Writer) {
     switch elem := element.(type) {
     case *textElement:
         buf.Write(elem.text)
@@ -503,54 +503,62 @@ func renderElement(element interface{}, contextChain []interface{}, buf io.Write
         val := lookup(contextChain, elem.name)
 
         if val.IsValid() {
-
-            switch val.Kind() {
-            case reflect.Interface:
-                switch vx := val.Elem(); vx.Kind() {
-                case reflect.Slice, reflect.Array, reflect.Map:
-                    v, err := json.Marshal(val.Interface())
-                    if (err != nil) {
-                        fmt.Fprint(buf, v)
-                    } else {
-                        fmt.Fprintf(buf, string(v))
+            if strictMustache {
+                if elem.raw {
+                    fmt.Fprint(buf, val.Interface())
+                } else {
+                    s := fmt.Sprint(val.Interface())
+                    template.HTMLEscape(buf, []byte(s))
+                }
+            } else {
+                switch val.Kind() {
+                case reflect.Interface:
+                    switch vx := val.Elem(); vx.Kind() {
+                    case reflect.Slice, reflect.Array, reflect.Map:
+                        v, err := json.Marshal(val.Interface())
+                        if (err != nil) {
+                            fmt.Fprint(buf, v)
+                        } else {
+                            fmt.Fprintf(buf, string(v))
+                        }
+                    default:
+                        fmt.Fprint(buf, val.Interface())
                     }
                 default:
                     fmt.Fprint(buf, val.Interface())
                 }
-            default:
-                fmt.Fprint(buf, val.Interface())
             }
         }
     case *sectionElement:
-        renderSection(elem, contextChain, buf)
+        renderSection(strictMustache, elem, contextChain, buf)
     case *Template:
-        elem.renderTemplate(contextChain, buf)
+        elem.renderTemplate(strictMustache, contextChain, buf)
     }
 }
 
-func (tmpl *Template) renderTemplate(contextChain []interface{}, buf io.Writer) {
+func (tmpl *Template) renderTemplate(strictMustache bool, contextChain []interface{}, buf io.Writer) {
     for _, elem := range tmpl.elems {
-        renderElement(elem, contextChain, buf)
+        renderElement(strictMustache, elem, contextChain, buf)
     }
 }
 
-func (tmpl *Template) Render(context ...interface{}) string {
+func (tmpl *Template) Render(strictMustache bool, context ...interface{}) string {
     var buf bytes.Buffer
     var contextChain []interface{}
     for _, c := range context {
         val := reflect.ValueOf(c)
         contextChain = append(contextChain, val)
     }
-    tmpl.renderTemplate(contextChain, &buf)
+    tmpl.renderTemplate(strictMustache, contextChain, &buf)
     return buf.String()
 }
 
-func (tmpl *Template) RenderInLayout(layout *Template, context ...interface{}) string {
-    content := tmpl.Render(context...)
+func (tmpl *Template) RenderInLayout(strictMustache bool, layout *Template, context ...interface{}) string {
+    content := tmpl.Render(strictMustache, context...)
     allContext := make([]interface{}, len(context)+1)
     copy(allContext[1:], context)
     allContext[0] = map[string]string{"content": content}
-    return layout.Render(allContext...)
+    return layout.Render(strictMustache, allContext...)
 }
 
 func ParseString(data string) (*Template, error) {
@@ -583,15 +591,15 @@ func ParseFile(filename string) (*Template, error) {
     return &tmpl, nil
 }
 
-func Render(data string, context ...interface{}) string {
+func Render(strictMustache bool, data string, context ...interface{}) string {
     tmpl, err := ParseString(data)
     if err != nil {
         return err.Error()
     }
-    return tmpl.Render(context...)
+    return tmpl.Render(strictMustache, context...)
 }
 
-func RenderInLayout(data string, layoutData string, context ...interface{}) string {
+func RenderInLayout(strictMustache bool, data string, layoutData string, context ...interface{}) string {
     layoutTmpl, err := ParseString(layoutData)
     if err != nil {
         return err.Error()
@@ -600,18 +608,18 @@ func RenderInLayout(data string, layoutData string, context ...interface{}) stri
     if err != nil {
         return err.Error()
     }
-    return tmpl.RenderInLayout(layoutTmpl, context...)
+    return tmpl.RenderInLayout(strictMustache, layoutTmpl, context...)
 }
 
-func RenderFile(filename string, context ...interface{}) string {
+func RenderFile(strictMustache bool, filename string, context ...interface{}) string {
     tmpl, err := ParseFile(filename)
     if err != nil {
         return err.Error()
     }
-    return tmpl.Render(context...)
+    return tmpl.Render(strictMustache, context...)
 }
 
-func RenderFileInLayout(filename string, layoutFile string, context ...interface{}) string {
+func RenderFileInLayout(strictMustache bool, filename string, layoutFile string, context ...interface{}) string {
     layoutTmpl, err := ParseFile(layoutFile)
     if err != nil {
         return err.Error()
@@ -621,5 +629,5 @@ func RenderFileInLayout(filename string, layoutFile string, context ...interface
     if err != nil {
         return err.Error()
     }
-    return tmpl.RenderInLayout(layoutTmpl, context...)
+    return tmpl.RenderInLayout(strictMustache, layoutTmpl, context...)
 }
