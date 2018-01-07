@@ -78,7 +78,7 @@ func (c Category) DisplayName() string {
     return c.Tag + " - " + c.Description
 }
 
-var tests = []Test{
+var strictTests = []Test{
     {`hello world`, nil, "hello world"},
     {`hello {{name}}`, map[string]string{"name": "world"}, "hello world"},
     {`{{var}}`, map[string]string{"var": "5 > 2"}, "5 &gt; 2"},
@@ -88,6 +88,10 @@ var tests = []Test{
     {`hello {{! comment }}world`, map[string]string{}, "hello world"},
     {`{{ a }}{{=<% %>=}}<%b %><%={{ }}=%>{{ c }}`, map[string]string{"a": "a", "b": "b", "c": "c"}, "abc"},
     {`{{ a }}{{= <% %> =}}<%b %><%= {{ }}=%>{{c}}`, map[string]string{"a": "a", "b": "b", "c": "c"}, "abc"},
+
+    //literal expansions
+    {`{{a}}`, map[string]map[string]string{"a": {"b": "c"}}, "map[b:c]"},
+    {`{{.}}`, map[string]string{"a": "b"}, "map[a:b]"},
 
     //does not exist
     {`{{dne}}`, map[string]string{"name": "world"}, ""},
@@ -175,9 +179,51 @@ var tests = []Test{
     {`{{#a}}{{b.c}}{{/a}}`, map[string]interface{}{"a": map[string]interface{}{"b": map[string]string{}}, "b": map[string]string{"c": "ERROR"}}, ""},
 }
 
-func TestBasic(t *testing.T) {
-    for _, test := range tests {
+var nonStrictTests = []Test{
+    {`{{var}}`, map[string]string{"var": "5 > 2"}, "5 > 2"},
+    {`{{{var}}}`, map[string]string{"var": "5 > 2"}, "5 > 2"},
+
+    //literal expansions
+    {`{{a}}`, map[string]map[string]string{"a": {"b": "c"}}, "{\"b\":\"c\"}"},
+    {`{{.}}`, map[string]string{"a": "b"}, "{\"a\":\"b\"}"},
+
+    //does not exist
+    {`{{dne}}`, map[string]string{"name": "world"}, ""},
+    {`{{dne}}`, User{"Mike", 1}, ""},
+    {`{{dne}}`, &User{"Mike", 1}, ""},
+    {`{{#has}}{{/has}}`, &User{"Mike", 1}, ""},
+
+    //section tests
+    {`{{#A}}{{B}}{{/A}}`, Data{true, "hello"}, "hello"},
+    {`{{#A}}{{{B}}}{{/A}}`, Data{true, "5 > 2"}, "5 > 2"},
+    {`{{#A}}{{B}}{{/A}}`, Data{true, "5 > 2"}, "5 > 2"},
+
+    //context chaining
+    {`hello {{#section}}{{name}}{{/section}}`, map[string]interface{}{"section": map[string]string{"name": "world"}}, "hello world"},
+    {`hello {{#section}}{{name}}{{/section}}`, map[string]interface{}{"name": "bob", "section": map[string]string{"name": "world"}}, "hello world"},
+    {`hello {{#bool}}{{#section}}{{name}}{{/section}}{{/bool}}`, map[string]interface{}{"bool": true, "section": map[string]string{"name": "world"}}, "hello world"},
+    {`{{#users}}{{canvas}}{{/users}}`, map[string]interface{}{"canvas": "hello", "users": []User{{"Mike", 1}}}, "hello"},
+    {`{{#categories}}{{DisplayName}}{{/categories}}`, map[string][]*Category{
+        "categories": {&Category{"a", "b"}},
+    }, "a - b"},
+
+    //invalid syntax - https://github.com/hoisie/mustache/issues/10
+    {`{{#a}}{{#b}}{{/a}}{{/b}}}`, map[string]interface{}{}, "line 1: interleaved closing tag: a"},
+}
+
+
+func TestStrict(t *testing.T) {
+    for _, test := range strictTests {
         output := Render(true, test.tmpl, test.context)
+        if output != test.expected {
+            t.Fatalf("%q expected %q got %q", test.tmpl, test.expected, output)
+        }
+    }
+}
+
+func TestNonStrict(t *testing.T) {
+    for _, test := range nonStrictTests {
+        output := Render(false, test.tmpl, test.context)
         if output != test.expected {
             t.Fatalf("%q expected %q got %q", test.tmpl, test.expected, output)
         }

@@ -524,6 +524,13 @@ func renderElement(strictMustache bool, element interface{}, contextChain []inte
                     default:
                         fmt.Fprint(buf, val.Interface())
                     }
+                case reflect.Slice, reflect.Array, reflect.Map:
+                    v, err := json.Marshal(val.Interface())
+                    if (err != nil) {
+                        fmt.Fprint(buf, v)
+                    } else {
+                        fmt.Fprintf(buf, string(v))
+                    }
                 default:
                     fmt.Fprint(buf, val.Interface())
                 }
